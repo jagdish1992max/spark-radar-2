@@ -4,6 +4,15 @@
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0">
 <title>Spark Radar — Trend Scanner</title>
+<script>
+  window.onerror = function(msg, url, line, col, error) {
+    var div = document.createElement('div');
+    div.style.cssText = 'position:fixed;top:0;left:0;right:0;background:#c0392b;color:#fff;padding:14px;font-family:monospace;font-size:12px;z-index:99999;white-space:pre-wrap;line-height:1.5;';
+    div.textContent = '⚠ JS ERROR (line ' + line + '): ' + msg;
+    function attach(){ if (document.body) document.body.prepend(div); }
+    if (document.readyState === 'loading') { document.addEventListener('DOMContentLoaded', attach); } else { attach(); }
+  };
+</script>
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
 <link href="https://fonts.googleapis.com/css2?family=Space+Grotesk:wght@500;600;700&family=Inter:wght@400;500;600&family=JetBrains+Mono:wght@400;500;600&display=swap" rel="stylesheet">
@@ -360,4 +369,182 @@ function formatNum(n){
   return String(n);
 }
 function daysAgo(dateStr){ return Math.max(1, Math.floor((Date.now() - new Date(dateStr).getTime()) / 86400000)); }
-functio
+function escapeHtml(str){ const d = document.createElement('div'); d.textContent = str; return d.innerHTML; }
+function copyText(text, el){
+  navigator.clipboard?.writeText(text);
+  el.classList.add('copied');
+  setTimeout(()=> el.classList.remove('copied'), 1500);
+}
+
+const loadingMessages = ["Scanning YouTube...", "Pulling video stats...", "Checking channel sizes...", "Finding outliers...", "Asking AI for hooks..."];
+let loadingInterval = null;
+function startLoading(){
+  els.loadingBox.classList.add('show');
+  els.emptyState.style.display = 'none';
+  els.oppCard.classList.remove('show');
+  els.pkgCard.classList.remove('show');
+  els.videoList.innerHTML = '';
+  els.scanBtn.disabled = true;
+  let i = 0;
+  els.loadingText.textContent = loadingMessages[0];
+  loadingInterval = setInterval(()=>{ i = (i+1) % loadingMessages.length; els.loadingText.textContent = loadingMessages[i]; }, 1300);
+}
+function stopLoading(){ els.loadingBox.classList.remove('show'); els.scanBtn.disabled = false; clearInterval(loadingInterval); }
+
+async function runScan(){
+  hideError();
+  const keyword = els.keywordInput.value.trim();
+  if(!keyword){ showError('Pehle koi keyword daalo.'); return; }
+
+  startLoading();
+  try{
+    const res = await fetch('/api/scan', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ keyword, days: state.days, channel: state.channel })
+    });
+    const rawText = await res.text();
+    let data;
+    try {
+      data = JSON.parse(rawText);
+    } catch(parseErr) {
+      throw new Error('Server se JSON nahi mila (status ' + res.status + '). Response: ' + rawText.slice(0, 200));
+    }
+    if(!res.ok) throw new Error(data.error || 'Kuch galat ho gaya');
+
+    if(!data.videos || data.videos.length === 0){
+      stopLoading();
+      els.emptyState.style.display = 'block';
+      els.emptyState.textContent = 'Is keyword pe is time-range mein kuch nahi mila. Different keyword ya bada time-range try karo.';
+      return;
+    }
+    renderVideos(data.videos);
+    if(data.analysis){
+      renderOpportunity(data.analysis, keyword);
+      await saveHistoryEntry({
+        id: Date.now().toString(),
+        keyword, channel: state.channel, timestamp: Date.now(),
+        score: data.analysis.score, scoreLabel: data.analysis.scoreLabel,
+        reasoning: data.analysis.reasoning, hooks: data.analysis.hooks,
+        relatedKeywords: data.analysis.relatedKeywords
+      });
+    }
+  }catch(err){
+    showError(err.message || 'Kuch galat ho gaya. Thodi der baad try karo.');
+  }finally{
+    stopLoading();
+  }
+}
+
+function renderVideos(videos){
+  els.videoList.innerHTML = videos.map(v => {
+    const isOutlier = v.outlierRatio && v.outlierRatio >= 5;
+    return `
+      <div class="video-card">
+        <img class="video-thumb" src="${v.thumb}" alt="">
+        <div class="video-info">
+          <p class="video-title">${escapeHtml(v.title)}</p>
+          <div class="video-stats">
+            <span class="video-stat">👁 ${formatNum(v.views)}</span>
+            <span class="video-stat">${daysAgo(v.publishedAt)}d ago</span>
+            ${isOutlier ? `<span class="outlier-badge">🔥 ${v.outlierRatio.toFixed(1)}x outlier</span>` : ''}
+          </div>
+          <div class="channel-name">${escapeHtml(v.channelTitle)}${v.subs ? ' · ' + formatNum(v.subs) + ' subs' : ''}</div>
+        </div>
+      </div>`;
+  }).join('');
+}
+
+function renderOpportunity(a, keyword){
+  els.oppScore.textContent = a.score ?? '--';
+  els.oppLabel.textContent = a.scoreLabel || '—';
+  els.oppReasoning.textContent = a.reasoning || '';
+  els.pkgCard.classList.remove('show');
+
+  els.hookList.innerHTML = (a.hooks || []).map((h, i) => `
+    <li class="hook-item">
+      <div class="hook-text" data-text="${escapeHtml(h)}">${escapeHtml(h)}<span class="copied-tag">Copied</span></div>
+      <div class="hook-actions"><button class="pkg-btn" data-hook="${escapeHtml(h)}" data-idx="${i}">Full Script &amp; SEO →</button></div>
+    </li>`).join('');
+
+  els.relatedRow.innerHTML = (a.relatedKeywords || []).map(k => `
+    <button class="related-chip" data-kw="${escapeHtml(k)}">${escapeHtml(k)}</button>`).join('');
+
+  els.oppCard.classList.add('show');
+
+  [...els.hookList.querySelectorAll('.hook-text')].forEach(item => {
+    item.addEventListener('click', ()=> copyText(item.dataset.text, item));
+  });
+  [...els.hookList.querySelectorAll('.pkg-btn')].forEach(btn => {
+    btn.addEventListener('click', ()=> generatePackage(keyword || els.keywordInput.value.trim(), btn.dataset.hook, btn));
+  });
+  [...els.relatedRow.children].forEach(chip => {
+    chip.addEventListener('click', ()=>{ els.keywordInput.value = chip.dataset.kw; runScan(); });
+  });
+}
+
+async function generatePackage(keyword, hook, btnEl){
+  hideError();
+  const originalText = btnEl.textContent;
+  btnEl.disabled = true;
+  btnEl.textContent = 'Generating...';
+  try{
+    const res = await fetch('/api/package', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ keyword, channel: state.channel, hook })
+    });
+    const data = await res.json();
+    if(!res.ok) throw new Error(data.error || 'Package generate nahi hua');
+    renderPackage(data, hook);
+  }catch(err){
+    showError(err.message || 'Package generate nahi hua, dobara try karo.');
+  }finally{
+    btnEl.disabled = false;
+    btnEl.textContent = originalText;
+  }
+}
+
+function renderPackage(pkg, hook){
+  els.pkgBasedOn.innerHTML = 'Based on hook: <b>' + escapeHtml(hook) + '</b>';
+  currentScript = pkg.script || {};
+
+  const steps = [
+    ['hook', currentScript.hook], ['problem', currentScript.problem],
+    ['solution', currentScript.solution], ['result', currentScript.result], ['cta', currentScript.cta]
+  ];
+  els.scriptSteps.innerHTML = steps.map(([label, text]) => `
+    <div class="script-step" data-text="${escapeHtml(text || '')}">
+      <div class="script-step-label">${label}</div>
+      <div class="script-step-text">${escapeHtml(text || '')}</div>
+      <span class="copied-tag">Copied</span>
+    </div>`).join('');
+  [...els.scriptSteps.querySelectorAll('.script-step')].forEach(item => {
+    item.addEventListener('click', ()=> copyText(item.dataset.text, item));
+  });
+
+  els.thumbPromptText.textContent = pkg.thumbnailPrompt || '';
+  els.seoTitleText.textContent = pkg.seo?.title || '';
+  els.seoDescText.textContent = pkg.seo?.description || '';
+  els.seoTagsText.textContent = (pkg.seo?.tags || []).join(', ');
+  els.seoHashtagsText.textContent = (pkg.seo?.hashtags || []).join(' ');
+
+  els.pkgCard.classList.add('show');
+  els.pkgCard.scrollIntoView({ behavior: 'smooth', block: 'start' });
+}
+
+els.copyFullScript.addEventListener('click', ()=>{
+  if(!currentScript) return;
+  const full = [currentScript.hook, currentScript.problem, currentScript.solution, currentScript.result, currentScript.cta].filter(Boolean).join('\n\n');
+  navigator.clipboard?.writeText(full);
+  els.copyFullScript.textContent = 'Copied ✓';
+  setTimeout(()=> els.copyFullScript.textContent = 'Copy Full Script', 1500);
+});
+
+[els.thumbPromptBlock, els.seoTitleBlock, els.seoDescBlock, els.seoTagsBlock, els.seoHashtagsBlock].forEach((block, i) => {
+  const textEls = [els.thumbPromptText, els.seoTitleText, els.seoDescText, els.seoTagsText, els.seoHashtagsText];
+  block.addEventListener('click', ()=> copyText(textEls[i].textContent, block));
+});
+</script>
+</body>
+</html>
