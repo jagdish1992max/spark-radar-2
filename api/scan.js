@@ -1,0 +1,7 @@
+{
+  "name": "spark-radar",
+  "version": "1.0.0",
+  "private": true,
+  "type": "module"
+}
+
