@@ -1,0 +1,363 @@
+<!DOCTYPE html>
+<html lang="hi">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0">
+<title>Spark Radar — Trend Scanner</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Space+Grotesk:wght@500;600;700&family=Inter:wght@400;500;600&family=JetBrains+Mono:wght@400;500;600&display=swap" rel="stylesheet">
+<style>
+  :root{
+    --bg:#0B0F1A; --surface:#131829; --surface-2:#1B2236; --hairline:#232B42;
+    --ember:#F2A93B; --ember-dim:#8A6A2E; --text:#ECEAE3; --text-muted:#7C84A0;
+    --danger:#E0654F; --good:#5FD49A;
+  }
+  *{box-sizing:border-box;}
+  html,body{margin:0;padding:0;}
+  body{
+    background:radial-gradient(ellipse at top, #11172A 0%, var(--bg) 55%);
+    color:var(--text); font-family:'Inter',sans-serif; min-height:100vh;
+    -webkit-font-smoothing:antialiased; padding-bottom:48px;
+  }
+  .wrap{max-width:640px;margin:0 auto;padding:20px 16px 0;}
+
+  header{display:flex;align-items:center;justify-content:space-between;padding:8px 0 18px;}
+  .brand{display:flex;align-items:center;gap:10px;}
+  .radar-mark{width:34px;height:34px;border-radius:50%;border:1.5px solid var(--ember-dim);position:relative;flex-shrink:0;}
+  .radar-mark::before{content:'';position:absolute;inset:0;border-radius:50%;background:conic-gradient(from 0deg, transparent 0deg, var(--ember) 28deg, transparent 60deg);animation:spin 3.5s linear infinite;}
+  .radar-mark::after{content:'';position:absolute;inset:9px;border-radius:50%;background:var(--bg);}
+  @keyframes spin{to{transform:rotate(360deg);}}
+  .brand-text h1{font-family:'Space Grotesk',sans-serif;font-size:18px;font-weight:600;margin:0;letter-spacing:-0.01em;}
+  .brand-text p{margin:0;font-size:11px;color:var(--text-muted);letter-spacing:0.02em;}
+  .history-btn{background:var(--surface);border:1px solid var(--hairline);color:var(--text-muted);padding:0 14px;height:38px;border-radius:10px;font-size:12.5px;cursor:pointer;display:flex;align-items:center;gap:6px;font-family:'Inter',sans-serif;}
+  .history-btn:active{background:var(--surface-2);}
+
+  /* History panel */
+  .history-panel{background:var(--surface);border:1px solid var(--hairline);border-radius:14px;padding:14px;margin-bottom:16px;display:none;}
+  .history-panel.open{display:block;}
+  .history-head{display:flex;justify-content:space-between;align-items:center;margin-bottom:10px;}
+  .history-head span{font-size:12px;text-transform:uppercase;letter-spacing:0.05em;color:var(--text-muted);font-weight:600;}
+  .clear-link{font-size:11.5px;color:var(--danger);background:none;border:none;cursor:pointer;}
+  .history-list{display:flex;flex-direction:column;gap:6px;max-height:320px;overflow-y:auto;}
+  .history-item{display:flex;align-items:center;gap:10px;background:var(--surface-2);border:1px solid var(--hairline);border-radius:10px;padding:9px 10px;cursor:pointer;}
+  .history-score{font-family:'JetBrains Mono',monospace;font-weight:600;color:var(--ember);font-size:14px;width:28px;flex-shrink:0;text-align:center;}
+  .history-info{flex:1;min-width:0;}
+  .history-kw{font-size:12.5px;font-weight:500;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;}
+  .history-meta{font-size:10.5px;color:var(--text-muted);}
+  .history-del{background:none;border:none;color:var(--text-muted);font-size:14px;cursor:pointer;padding:4px 6px;flex-shrink:0;}
+  .history-empty{font-size:12.5px;color:var(--text-muted);text-align:center;padding:14px 0;}
+
+  .search-card{background:var(--surface);border:1px solid var(--hairline);border-radius:16px;padding:16px;margin-bottom:18px;}
+  .search-row{display:flex;gap:8px;}
+  .search-row input{flex:1;background:var(--surface-2);border:1px solid var(--hairline);color:var(--text);padding:13px 14px;border-radius:10px;font-size:15px;font-family:'Inter',sans-serif;}
+  .search-row input:focus{outline:none;border-color:var(--ember-dim);}
+  .scan-btn{background:var(--ember);color:#1A1305;border:none;padding:0 18px;border-radius:10px;font-weight:600;font-size:14px;cursor:pointer;white-space:nowrap;}
+  .scan-btn:disabled{opacity:0.5;}
+  .filters{display:flex;gap:8px;margin-top:12px;flex-wrap:wrap;}
+  .chip{background:var(--surface-2);border:1px solid var(--hairline);color:var(--text-muted);padding:7px 13px;border-radius:20px;font-size:12.5px;cursor:pointer;font-family:'Inter',sans-serif;}
+  .chip.active{background:rgba(242,169,59,0.12);border-color:var(--ember-dim);color:var(--ember);}
+
+  .loading{display:none;flex-direction:column;align-items:center;padding:50px 0;gap:18px;}
+  .loading.show{display:flex;}
+  .loading-radar{width:72px;height:72px;border-radius:50%;border:1px solid var(--hairline);position:relative;}
+  .loading-radar::before{content:'';position:absolute;inset:0;border-radius:50%;background:conic-gradient(from 0deg, transparent 0deg, var(--ember) 40deg, transparent 90deg);animation:spin 1.4s linear infinite;}
+  .loading-radar::after{content:'';position:absolute;inset:14px;border-radius:50%;background:var(--bg);}
+  .loading-text{font-size:13px;color:var(--text-muted);font-family:'JetBrains Mono',monospace;}
+
+  .error-box{background:rgba(224,101,79,0.1);border:1px solid rgba(224,101,79,0.35);color:#F2A192;padding:13px 14px;border-radius:11px;font-size:13px;margin-bottom:16px;display:none;line-height:1.5;}
+  .error-box.show{display:block;}
+
+  .opp-card{background:linear-gradient(145deg, var(--surface) 0%, var(--surface-2) 100%);border:1px solid var(--hairline);border-radius:18px;padding:20px;margin-bottom:18px;display:none;}
+  .opp-card.show{display:block;}
+  .opp-top{display:flex;align-items:flex-end;gap:14px;margin-bottom:14px;}
+  .opp-score{font-family:'JetBrains Mono',monospace;font-size:44px;font-weight:600;color:var(--ember);line-height:1;}
+  .opp-meta{flex:1;}
+  .opp-label{font-family:'Space Grotesk',sans-serif;font-size:16px;font-weight:600;margin-bottom:2px;}
+  .opp-sub{font-size:11.5px;color:var(--text-muted);}
+  .opp-reasoning{font-size:13.5px;line-height:1.65;color:var(--text);margin-bottom:16px;}
+  .opp-section-label{font-size:11px;text-transform:uppercase;letter-spacing:0.06em;color:var(--text-muted);margin-bottom:8px;font-weight:600;}
+  .hook-list{list-style:none;padding:0;margin:0 0 14px;display:flex;flex-direction:column;gap:8px;}
+  .hook-item{background:var(--surface-2);border:1px solid var(--hairline);border-radius:10px;padding:11px 12px;}
+  .hook-text{font-size:13.5px;line-height:1.5;cursor:pointer;position:relative;}
+  .hook-text .copied-tag{position:absolute;top:0;right:0;font-size:10px;color:var(--good);opacity:0;font-family:'JetBrains Mono',monospace;}
+  .hook-text.copied .copied-tag{opacity:1;}
+  .hook-actions{margin-top:8px;display:flex;}
+  .pkg-btn{background:none;border:1px solid var(--ember-dim);color:var(--ember);font-size:11.5px;padding:5px 10px;border-radius:7px;cursor:pointer;font-family:'Inter',sans-serif;}
+  .pkg-btn:disabled{opacity:0.5;}
+  .related-row{display:flex;gap:7px;flex-wrap:wrap;}
+  .related-chip{background:transparent;border:1px solid var(--hairline);color:var(--text-muted);padding:6px 11px;border-radius:16px;font-size:12px;cursor:pointer;}
+
+  /* Package card */
+  .pkg-card{background:linear-gradient(145deg, var(--surface) 0%, var(--surface-2) 100%);border:1px solid var(--ember-dim);border-radius:18px;padding:20px;margin-bottom:18px;display:none;}
+  .pkg-card.show{display:block;}
+  .pkg-based-on{font-size:11px;color:var(--text-muted);margin-bottom:14px;line-height:1.5;}
+  .pkg-based-on b{color:var(--ember);font-weight:500;}
+  .script-step{display:flex;gap:10px;margin-bottom:10px;cursor:pointer;background:var(--surface-2);border:1px solid var(--hairline);border-radius:10px;padding:10px 12px;position:relative;}
+  .script-step-label{font-family:'JetBrains Mono',monospace;font-size:10px;color:var(--ember);text-transform:uppercase;letter-spacing:0.04em;width:62px;flex-shrink:0;padding-top:1px;}
+  .script-step-text{font-size:13px;line-height:1.55;flex:1;}
+  .script-step .copied-tag{position:absolute;top:8px;right:10px;font-size:10px;color:var(--good);opacity:0;font-family:'JetBrains Mono',monospace;}
+  .script-step.copied .copied-tag{opacity:1;}
+  .copy-all-btn{background:var(--ember);color:#1A1305;border:none;padding:9px 14px;border-radius:9px;font-weight:600;font-size:12.5px;cursor:pointer;margin:6px 0 18px;}
+  .pkg-divider{border:none;border-top:1px solid var(--hairline);margin:18px 0;}
+  .copy-block{background:var(--surface-2);border:1px solid var(--hairline);border-radius:10px;padding:11px 12px;font-size:13px;line-height:1.55;cursor:pointer;margin-bottom:10px;position:relative;}
+  .copy-block .copied-tag{position:absolute;top:8px;right:10px;font-size:10px;color:var(--good);opacity:0;font-family:'JetBrains Mono',monospace;}
+  .copy-block.copied .copied-tag{opacity:1;}
+  .copy-block-label{font-size:10.5px;color:var(--text-muted);text-transform:uppercase;letter-spacing:0.04em;margin-bottom:4px;display:block;}
+
+  .video-list{display:flex;flex-direction:column;gap:10px;}
+  .video-card{background:var(--surface);border:1px solid var(--hairline);border-radius:14px;padding:12px;display:flex;gap:12px;}
+  .video-thumb{width:96px;height:64px;border-radius:8px;object-fit:cover;flex-shrink:0;background:var(--surface-2);}
+  .video-info{flex:1;min-width:0;}
+  .video-title{font-size:13px;line-height:1.4;margin:0 0 6px;font-weight:500;display:-webkit-box;-webkit-line-clamp:2;-webkit-box-orient:vertical;overflow:hidden;}
+  .video-stats{display:flex;gap:10px;flex-wrap:wrap;align-items:center;}
+  .video-stat{font-size:11px;color:var(--text-muted);font-family:'JetBrains Mono',monospace;}
+  .outlier-badge{background:rgba(242,169,59,0.14);color:var(--ember);font-size:10.5px;font-weight:600;padding:2px 7px;border-radius:6px;font-family:'JetBrains Mono',monospace;}
+  .channel-name{font-size:11px;color:var(--text-muted);margin-top:3px;}
+
+  .empty-state{text-align:center;padding:60px 20px;color:var(--text-muted);font-size:13.5px;line-height:1.6;}
+  footer{text-align:center;padding:30px 0 10px;font-size:11px;color:var(--text-muted);}
+</style>
+</head>
+<body>
+<div class="wrap">
+
+  <header>
+    <div class="brand">
+      <div class="radar-mark"></div>
+      <div class="brand-text">
+        <h1>Spark Radar</h1>
+        <p>YouTube trend scanner — free</p>
+      </div>
+    </div>
+    <button class="history-btn" id="historyBtn">🕘 History</button>
+  </header>
+
+  <div class="history-panel" id="historyPanel">
+    <div class="history-head">
+      <span>Recent Scans</span>
+      <button class="clear-link" id="clearHistoryBtn">Clear all</button>
+    </div>
+    <div class="history-list" id="historyList"></div>
+  </div>
+
+  <div class="search-card">
+    <div class="search-row">
+      <input type="text" id="keywordInput" placeholder="Keyword daalo... jaise 'free AI tool'">
+      <button class="scan-btn" id="scanBtn">Scan</button>
+    </div>
+    <div class="filters" id="dayFilters">
+      <button class="chip" data-days="7">7 din</button>
+      <button class="chip active" data-days="30">30 din</button>
+      <button class="chip" data-days="90">90 din</button>
+    </div>
+    <div class="filters" id="channelFilters" style="margin-top:8px;">
+      <button class="chip active" data-channel="cipherjd">Tech / AI</button>
+      <button class="chip" data-channel="mysticfear">Horror</button>
+      <button class="chip" data-channel="mindcontrol">Dark Truths</button>
+    </div>
+  </div>
+
+  <div class="error-box" id="errorBox"></div>
+
+  <div class="loading" id="loadingBox">
+    <div class="loading-radar"></div>
+    <div class="loading-text" id="loadingText">Scanning YouTube...</div>
+  </div>
+
+  <div class="opp-card" id="oppCard">
+    <div class="opp-top">
+      <div class="opp-score" id="oppScore">--</div>
+      <div class="opp-meta">
+        <div class="opp-label" id="oppLabel">—</div>
+        <div class="opp-sub">Content Opportunity Score</div>
+      </div>
+    </div>
+    <div class="opp-reasoning" id="oppReasoning"></div>
+    <div class="opp-section-label">Suggested Hooks</div>
+    <ul class="hook-list" id="hookList"></ul>
+    <div class="opp-section-label">Related Angles</div>
+    <div class="related-row" id="relatedRow"></div>
+  </div>
+
+  <div class="pkg-card" id="pkgCard">
+    <div class="pkg-based-on" id="pkgBasedOn"></div>
+
+    <div class="opp-section-label">Script</div>
+    <div id="scriptSteps"></div>
+    <button class="copy-all-btn" id="copyFullScript">Copy Full Script</button>
+
+    <hr class="pkg-divider">
+    <div class="opp-section-label">Thumbnail Prompt</div>
+    <div class="copy-block" id="thumbPromptBlock">
+      <span class="copy-block-label">Tap to copy</span>
+      <span id="thumbPromptText"></span>
+      <span class="copied-tag">Copied</span>
+    </div>
+
+    <hr class="pkg-divider">
+    <div class="opp-section-label">SEO</div>
+    <div class="copy-block" id="seoTitleBlock"><span class="copy-block-label">Title</span><span id="seoTitleText"></span><span class="copied-tag">Copied</span></div>
+    <div class="copy-block" id="seoDescBlock"><span class="copy-block-label">Description</span><span id="seoDescText"></span><span class="copied-tag">Copied</span></div>
+    <div class="copy-block" id="seoTagsBlock"><span class="copy-block-label">Tags</span><span id="seoTagsText"></span><span class="copied-tag">Copied</span></div>
+    <div class="copy-block" id="seoHashtagsBlock"><span class="copy-block-label">Hashtags</span><span id="seoHashtagsText"></span><span class="copied-tag">Copied</span></div>
+  </div>
+
+  <div class="video-list" id="videoList"></div>
+
+  <div class="empty-state" id="emptyState">
+    Koi keyword daalo aur Scan dabao —<br>top YouTube videos, outliers, aur AI hooks yahan dikhenge.
+  </div>
+
+  <footer>Spark Radar · made by CipherJD</footer>
+</div>
+
+<script>
+const els = {
+  historyBtn: document.getElementById('historyBtn'),
+  historyPanel: document.getElementById('historyPanel'),
+  historyList: document.getElementById('historyList'),
+  clearHistoryBtn: document.getElementById('clearHistoryBtn'),
+  keywordInput: document.getElementById('keywordInput'),
+  scanBtn: document.getElementById('scanBtn'),
+  dayFilters: document.getElementById('dayFilters'),
+  channelFilters: document.getElementById('channelFilters'),
+  errorBox: document.getElementById('errorBox'),
+  loadingBox: document.getElementById('loadingBox'),
+  loadingText: document.getElementById('loadingText'),
+  oppCard: document.getElementById('oppCard'),
+  oppScore: document.getElementById('oppScore'),
+  oppLabel: document.getElementById('oppLabel'),
+  oppReasoning: document.getElementById('oppReasoning'),
+  hookList: document.getElementById('hookList'),
+  relatedRow: document.getElementById('relatedRow'),
+  pkgCard: document.getElementById('pkgCard'),
+  pkgBasedOn: document.getElementById('pkgBasedOn'),
+  scriptSteps: document.getElementById('scriptSteps'),
+  copyFullScript: document.getElementById('copyFullScript'),
+  thumbPromptBlock: document.getElementById('thumbPromptBlock'),
+  thumbPromptText: document.getElementById('thumbPromptText'),
+  seoTitleBlock: document.getElementById('seoTitleBlock'), seoTitleText: document.getElementById('seoTitleText'),
+  seoDescBlock: document.getElementById('seoDescBlock'), seoDescText: document.getElementById('seoDescText'),
+  seoTagsBlock: document.getElementById('seoTagsBlock'), seoTagsText: document.getElementById('seoTagsText'),
+  seoHashtagsBlock: document.getElementById('seoHashtagsBlock'), seoHashtagsText: document.getElementById('seoHashtagsText'),
+  videoList: document.getElementById('videoList'),
+  emptyState: document.getElementById('emptyState'),
+};
+
+let state = { days: 30, channel: 'cipherjd' };
+let currentScript = null;
+
+// ---------- Storage helpers (Claude artifact storage with localStorage fallback for real deployment) ----------
+async function storageGet(key){
+  try{
+    const r = await window.storage.get(key, false);
+    return r ? r.value : null;
+  }catch(e){
+    try{ return localStorage.getItem(key); }catch(e2){ return null; }
+  }
+}
+async function storageSet(key, value){
+  try{ await window.storage.set(key, value, false); }
+  catch(e){ try{ localStorage.setItem(key, value); }catch(e2){} }
+}
+
+const HISTORY_KEY = 'spark-radar-history';
+async function loadHistory(){
+  const raw = await storageGet(HISTORY_KEY);
+  try{ return raw ? JSON.parse(raw) : []; }catch(e){ return []; }
+}
+async function saveHistoryEntry(entry){
+  const list = await loadHistory();
+  list.unshift(entry);
+  await storageSet(HISTORY_KEY, JSON.stringify(list.slice(0, 20)));
+}
+async function deleteHistoryEntry(id){
+  const list = await loadHistory();
+  await storageSet(HISTORY_KEY, JSON.stringify(list.filter(e => e.id !== id)));
+  renderHistory();
+}
+async function clearHistory(){
+  await storageSet(HISTORY_KEY, JSON.stringify([]));
+  renderHistory();
+}
+
+function timeAgo(ts){
+  const mins = Math.floor((Date.now() - ts) / 60000);
+  if(mins < 60) return mins + 'm ago';
+  const hrs = Math.floor(mins / 60);
+  if(hrs < 24) return hrs + 'h ago';
+  return Math.floor(hrs / 24) + 'd ago';
+}
+
+async function renderHistory(){
+  const list = await loadHistory();
+  if(list.length === 0){
+    els.historyList.innerHTML = '<div class="history-empty">Abhi tak koi scan history nahi hai.</div>';
+    return;
+  }
+  els.historyList.innerHTML = list.map(e => `
+    <div class="history-item" data-id="${e.id}">
+      <div class="history-score">${e.score ?? '--'}</div>
+      <div class="history-info">
+        <div class="history-kw">${escapeHtml(e.keyword)}</div>
+        <div class="history-meta">${e.scoreLabel || ''} · ${timeAgo(e.timestamp)}</div>
+      </div>
+      <button class="history-del" data-del="${e.id}">✕</button>
+    </div>`).join('');
+
+  [...els.historyList.querySelectorAll('.history-item')].forEach(item => {
+    item.addEventListener('click', (ev)=>{
+      if(ev.target.dataset.del) return;
+      const id = item.dataset.id;
+      loadHistory().then(list => {
+        const entry = list.find(e => e.id === id);
+        if(entry){
+          renderOpportunity(entry);
+          els.videoList.innerHTML = '';
+          els.emptyState.style.display = 'block';
+          els.emptyState.textContent = 'Ye saved result hai — fresh video data ke liye dobara scan karo.';
+          els.historyPanel.classList.remove('open');
+          window.scrollTo({top:0, behavior:'smooth'});
+        }
+      });
+    });
+  });
+  [...els.historyList.querySelectorAll('[data-del]')].forEach(btn => {
+    btn.addEventListener('click', (ev)=>{ ev.stopPropagation(); deleteHistoryEntry(btn.dataset.del); });
+  });
+}
+
+els.historyBtn.addEventListener('click', ()=>{
+  els.historyPanel.classList.toggle('open');
+  if(els.historyPanel.classList.contains('open')) renderHistory();
+});
+els.clearHistoryBtn.addEventListener('click', clearHistory);
+
+// ---------- UI wiring ----------
+els.dayFilters.addEventListener('click', (e)=>{
+  if(e.target.classList.contains('chip')){
+    [...els.dayFilters.children].forEach(c=>c.classList.remove('active'));
+    e.target.classList.add('active');
+    state.days = parseInt(e.target.dataset.days);
+  }
+});
+els.channelFilters.addEventListener('click', (e)=>{
+  if(e.target.classList.contains('chip')){
+    [...els.channelFilters.children].forEach(c=>c.classList.remove('active'));
+    e.target.classList.add('active');
+    state.channel = e.target.dataset.channel;
+  }
+});
+els.scanBtn.addEventListener('click', runScan);
+els.keywordInput.addEventListener('keydown', (e)=>{ if(e.key === 'Enter') runScan(); });
+
+function showError(msg){ els.errorBox.textContent = msg; els.errorBox.classList.add('show'); }
+function hideError(){ els.errorBox.classList.remove('show'); }
+function formatNum(n){
+  if(n >= 1000000) return (n/1000000).toFixed(1).replace(/\.0$/,'') + 'M';
+  if(n >= 1000) return (n/1000).toFixed(1).replace(/\.0$/,'') + 'K';
+  return String(n);
+}
+function daysAgo(dateStr){ return Math.max(1, Math.floor((Date.now() - new Date(dateStr).getTime()) / 86400000)); }
+functio
